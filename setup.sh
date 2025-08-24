@@ -83,7 +83,9 @@ sudo apt-get install -y \
 echo "✓ All packages installed using simplified Ubuntu package approach"
 
 echo "Adding user to tss group for TPM device access..."
-USERNAME=$(whoami)
+# Use the real username passed from the main script, fallback to whoami
+USERNAME=${REAL_USERNAME:-$(whoami)}
+echo "Using username: $USERNAME"
 
 # Create tss group if it doesn't exist
 if ! grep -q "^tss:" /etc/group; then
@@ -225,13 +227,23 @@ export VAULT_SKIP_VERIFY=1
 
 # Wait for Vault to be ready
 echo "Waiting for Vault to start..."
-for i in {1..30}; do
+for i in {1..15}; do
     if vault status >/dev/null 2>&1; then
+        echo "✓ Vault is ready!"
         break
     fi
-    echo "Waiting for Vault to start... ($i/30)"
-    sleep 2
+    if [ $i -le 5 ]; then
+        sleep 1  # Quick checks for first 5 seconds
+    else
+        sleep 2  # Longer intervals after that
+    fi
+    echo "Waiting for Vault to start... ($i/15)"
 done
+
+# Final check
+if ! vault status >/dev/null 2>&1; then
+    echo "WARNING: Vault may not be ready after 30 seconds. Attempting to continue..."
+fi
 
 # Check if Vault is already initialized and unsealed
 VAULT_STATUS=$(vault status -format=json 2>/dev/null || echo '{}')
@@ -480,7 +492,9 @@ if openssl list -providers | grep -q tpm2; then
     echo 'export TPM2TOOLS_TCTI="device:/dev/tpmrm0"' | sudo tee -a /etc/environment
     
     echo "Configuring Vault and TPM2 environment..."
-    cat >> ~/.bashrc << 'BASHRC_EOF'
+    USER_HOME="/home/$USERNAME"
+    echo "Adding environment variables to $USER_HOME/.bashrc"
+    cat >> "$USER_HOME/.bashrc" << 'BASHRC_EOF'
 
 # Vault and TPM2 Environment Configuration
 export VAULT_ADDR="https://localhost:8200"
@@ -492,6 +506,7 @@ if [ -f /tmp/vault-init.json ] && command -v jq >/dev/null 2>&1; then
     export VAULT_TOKEN=$(cat /tmp/vault-init.json | jq -r '.root_token' 2>/dev/null)
 fi
 BASHRC_EOF
+    echo "✓ Environment variables added to $USER_HOME/.bashrc"
     
     echo "Testing TPM2 key generation..."
     export TPM2TOOLS_TCTI="device:/dev/tpmrm0"
@@ -526,7 +541,7 @@ scp /tmp/remote_setup.sh $SSH_TARGET:$REMOTE_SETUP_DIR/
 ssh $SSH_TARGET "chmod +x $REMOTE_SETUP_DIR/remote_setup.sh"
 
 echo "Executing remote setup..."
-ssh $SSH_TARGET "$REMOTE_SETUP_DIR/remote_setup.sh"
+ssh $SSH_TARGET "REAL_USERNAME='$USERNAME' $REMOTE_SETUP_DIR/remote_setup.sh"
 
 echo
 echo "=== Setup Complete ==="
