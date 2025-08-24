@@ -28,12 +28,17 @@ This document provides step-by-step instructions for demonstrating TPM-based TLS
 ```
 
 ### Setup Script Features
-- ✅ Automatic TPM2 library installation with Ubuntu 24 compatibility
-- ✅ OpenSSL TPM2 provider compilation and configuration
+- ✅ Automatic TPM2 library installation via Ubuntu packages (simplified approach)
+- ✅ OpenSSL TPM2 provider configuration for TSS2 key generation
 - ✅ Vault server installation with proper TLS certificate setup **including SANs**
-- ✅ PKI engine and TLS cert authentication configuration (supports ECC keys)
-- ✅ vault-tmp-helper v0.1.1 installation from GitHub releases
-- ✅ TPM2TOOLS_TCTI environment configuration for TSS2 key generation
+- ✅ PKI engine and TLS cert authentication configuration (supports any key type including ECC)
+- ✅ **KV v2 secrets engine** enabled at `secret/` path with sample data
+- ✅ **Comprehensive KV access policy** for TPM certificate authentication
+- ✅ vault-tpm-helper installation from GitHub releases
+- ✅ TPM2TOOLS_TCTI environment configuration in .bashrc
+- ✅ **Sample secrets** for immediate testing (demo/app, demo/config, myapp/credentials)
+- ✅ **Application-specific authentication examples** for custom policies
+- ✅ TSS group creation and user permissions for TPM device access
 - ✅ Intelligent handling of existing Vault installations
 - ✅ Comprehensive error handling and validation
 
@@ -277,11 +282,138 @@ vault token lookup
 # - meta: containing certificate details including serial_number and common_name
 # - ttl: ~768h (32 days)
 
-# Test access to secrets
-vault kv list secret/ 2>/dev/null || echo "No secrets found (expected for new setup)"
+# Test access to KV secrets (setup.sh creates sample data)
+vault kv list secret/
 ```
 
-## Step 7: Comprehensive Testing
+## Step 7: Testing KV Secrets Access
+
+The setup script automatically creates sample KV data for testing. After successful TPM authentication, you can access these secrets:
+
+### List All Secrets
+```bash
+# List top-level secret paths
+vault kv list secret/
+
+# Expected output:
+# Keys
+# ----
+# demo/
+# myapp/
+
+# List secrets in demo/ path
+vault kv list secret/demo/
+
+# Expected output:
+# Keys  
+# ----
+# app
+# config
+```
+
+### Read Sample Application Secrets
+```bash
+# Read application credentials
+vault kv get secret/demo/app
+
+# Expected output shows:
+# - username: demo-user
+# - password: demo-password  
+# - api_key: abc123xyz789
+# - database_url: postgresql://user:pass@localhost:5432/myapp
+
+# Read configuration settings
+vault kv get secret/demo/config
+
+# Expected output shows:
+# - environment: development
+# - debug: true
+# - max_connections: 100
+
+# Read app-specific credentials  
+vault kv get secret/myapp/credentials
+
+# Expected output shows:
+# - service_account: myapp-service
+# - token: myapp-secret-token-123
+# - refresh_token: refresh-abc-xyz-789
+```
+
+### Extract Specific Fields
+```bash
+# Get specific field values
+vault kv get -field=username secret/demo/app
+vault kv get -field=api_key secret/demo/app  
+vault kv get -field=environment secret/demo/config
+vault kv get -field=service_account secret/myapp/credentials
+```
+
+### Test KV Operations
+```bash
+# Create new secret
+vault kv put secret/test/new-app \
+    service="test-service" \
+    api_endpoint="https://api.example.com" \
+    timeout="30s"
+
+# Update existing secret (creates new version in KV v2)
+vault kv put secret/demo/app \
+    username="updated-user" \
+    password="new-password" \
+    api_key="updated-key-456"
+
+# Read secret versions
+vault kv get -version=1 secret/demo/app  # Original version
+vault kv get -version=2 secret/demo/app  # Updated version
+
+# Delete secret
+vault kv delete secret/test/new-app
+```
+
+## Step 8: Application-Specific Authentication
+
+The setup provides a template for configuring application-specific certificate authentication:
+
+### Create Custom Application Policy
+```bash
+# Switch to root token for policy management
+export VAULT_TOKEN=$(cat /tmp/vault-init.json | jq -r '.root_token')
+
+# Create app-specific policy
+vault policy write myapp-policy - << 'EOF'
+# Allow access only to myapp secrets
+path "secret/data/myapp/*" {
+  capabilities = ["create", "read", "update", "delete"]
+}
+
+path "secret/metadata/myapp/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+
+# Allow listing myapp/ path
+path "secret/metadata/myapp" {
+  capabilities = ["list"]
+}
+EOF
+```
+
+### Configure Application Certificate Authentication  
+```bash
+# Configure certificate for specific application
+vault write auth/cert/certs/myapp \
+    display_name="MyApp Certificate" \
+    policies="myapp-policy" \
+    certificate=@/path/to/myapp-cert.pem
+
+# Test with application certificate
+vault-tpm-helper \
+    -ca="ca.pem" \
+    -client-cert="myapp-client.cert.pem" \
+    -client-key="myapp-client.key.pem" \
+    -authpath="cert"
+```
+
+## Step 9: Comprehensive Testing
 
 ### Test Key Persistence
 ```bash
@@ -323,7 +455,7 @@ time vault-tpm-helper \
     -auth-path="cert"
 ```
 
-## Step 8: Troubleshooting Commands
+## Step 10: Troubleshooting Commands
 
 ### If TPM Authentication Fails
 

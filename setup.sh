@@ -327,6 +327,43 @@ if ! vault secrets list | grep -q "^pki/"; then
 else
     echo "PKI secrets engine already enabled"
 fi
+
+echo "Enabling KV v2 secrets engine..."
+if ! vault secrets list | grep -q "^secret/"; then
+    vault secrets enable -path=secret kv-v2
+    echo "KV v2 secrets engine enabled at secret/"
+else
+    echo "KV v2 secrets engine already enabled at secret/"
+fi
+
+echo "Creating sample KV data for testing..."
+vault kv put secret/demo/app \
+    username="demo-user" \
+    password="demo-password" \
+    api_key="abc123xyz789" \
+    database_url="postgresql://user:pass@localhost:5432/myapp"
+
+vault kv put secret/demo/config \
+    environment="development" \
+    debug="true" \
+    max_connections="100"
+
+vault kv put secret/myapp/credentials \
+    service_account="myapp-service" \
+    token="myapp-secret-token-123" \
+    refresh_token="refresh-abc-xyz-789"
+
+echo "✓ Sample data created:"
+echo "  - secret/demo/app (application credentials)"
+echo "  - secret/demo/config (configuration settings)"
+echo "  - secret/myapp/credentials (app-specific secrets)"
+
+echo "Verifying KV access with TPM certificate authentication..."
+echo "Test commands you can run after TPM authentication:"
+echo "  vault kv list secret/"
+echo "  vault kv get secret/demo/app"
+echo "  vault kv get secret/demo/config"
+echo "  vault kv get secret/myapp/credentials"
 vault secrets tune -max-lease-ttl=8760h pki
 
 echo "Configuring PKI root CA..."
@@ -356,11 +393,58 @@ else
     echo "TLS cert auth method already enabled"
 fi
 
+echo "Creating KV secrets policy for TPM certificate authentication..."
+vault policy write kv-policy - << 'POLICY_EOF'
+# Allow listing the secret/ mount point and its subdirectories
+path "secret/" {
+  capabilities = ["list"]
+}
+
+path "secret/*" {
+  capabilities = ["list"]
+}
+
+# Allow full access to KV v2 metadata (required for listing and operations)
+path "secret/metadata/*" {
+  capabilities = ["create", "read", "update", "delete", "list"]
+}
+
+# Allow full access to KV v2 data
+path "secret/data/*" {
+  capabilities = ["create", "read", "update", "delete"]
+}
+
+# Allow access to sys/mounts for KV engine discovery
+path "sys/mounts" {
+  capabilities = ["read"]
+}
+
+# Allow access to sys/internal/ui/mounts for UI functionality  
+path "sys/internal/ui/mounts/*" {
+  capabilities = ["read"]
+}
+POLICY_EOF
+
 echo "Configuring TLS cert auth method..."
 vault write auth/cert/certs/demo \
     display_name="TPM Demo Cert" \
-    policies="default" \
+    policies="default,kv-policy" \
     certificate=@<(vault read -field=certificate pki/cert/ca)
+
+echo "Setting up example application certificate authentication..."
+echo "You can configure additional applications using this pattern:"
+echo ""
+echo "# Example: Configure myapp certificate authentication"
+echo "# vault policy write myapp-policy - << 'APP_POLICY_EOF'"
+echo "# path \"secret/data/myapp/*\" {"
+echo "#   capabilities = [\"create\", \"read\", \"update\", \"delete\"]"
+echo "# }"
+echo "# APP_POLICY_EOF"
+echo ""
+echo "# vault write auth/cert/certs/myapp \\"
+echo "#     display_name=\"myapp-cert\" \\"
+echo "#     policies=\"myapp-policy\" \\"
+echo "#     certificate=@path/to/myapp-cert.pem"
 
 echo "Downloading vault-tpm-helper..."
 ARCH=$(uname -m)
