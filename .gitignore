@@ -1,0 +1,20 @@
+# Demo configuration
+.demo_config
+
+# Certificate files
+*.pem
+*.csr
+*.crt
+*.json
+
+# Vault credentials
+vault-credentials.env
+
+# Backup files
+*.backup
+
+# Logs
+*.log
+
+# Temporary files
+remote_*.sh
