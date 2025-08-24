@@ -195,12 +195,19 @@ cluster_addr = "https://0.0.0.0:8201"
 ui = true
 VAULT_EOF
 
-echo "Creating self-signed certificate for Vault..."
+echo "Creating self-signed certificate for Vault with proper SANs..."
 sudo mkdir -p /opt/vault/data
 sudo chown vault:vault /opt/vault/data
 
 if [ ! -f "/etc/vault.d/vault-cert.pem" ]; then
-    sudo openssl req -x509 -newkey rsa:4096 -keyout /etc/vault.d/vault-key.pem -out /etc/vault.d/vault-cert.pem -days 365 -nodes -subj "/C=US/ST=CA/L=SF/O=Demo/CN=vault-tpm-demo"
+    # Get the server's IP address for SAN
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    sudo openssl req -x509 -newkey rsa:4096 \
+        -keyout /etc/vault.d/vault-key.pem \
+        -out /etc/vault.d/vault-cert.pem \
+        -days 365 -nodes \
+        -subj "/C=US/ST=CA/L=SF/O=Demo/CN=vault-tpm-demo" \
+        -addext "subjectAltName=DNS:vault-tpm-demo,DNS:localhost,IP:127.0.0.1,IP:${SERVER_IP}"
     sudo chown vault:vault /etc/vault.d/vault-*.pem
     sudo chmod 600 /etc/vault.d/vault-key.pem
 fi
@@ -376,7 +383,9 @@ vault write pki/roles/client-cert \
     allow_subdomains=true \
     allow_any_name=true \
     max_ttl="72h" \
-    generate_lease=true
+    generate_lease=true \
+    key_type="any" \
+    key_bits=256
 
 echo "Enabling TLS certificate authentication..."
 if ! vault auth list | grep -q "^cert/"; then
@@ -425,6 +434,20 @@ if openssl list -providers | grep -q tpm2; then
     echo "Configuring TPM2 environment..."
     echo 'export TPM2TOOLS_TCTI="device:/dev/tpmrm0"' | sudo tee -a /etc/environment
     echo 'export TPM2TOOLS_TCTI="device:/dev/tpmrm0"' >> ~/.bashrc
+    
+    echo "Configuring Vault environment..."
+    cat >> ~/.bashrc << 'VAULT_CONFIG'
+export VAULT_ADDR="https://localhost:8200"
+export VAULT_SKIP_VERIFY=1
+
+# Dynamically retrieve Vault root token
+if [ -f /tmp/vault-init.json ] && command -v jq >/dev/null 2>&1; then
+    VAULT_TOKEN=$(cat /tmp/vault-init.json | jq -r '.root_token' 2>/dev/null)
+    if [ "$VAULT_TOKEN" != "null" ] && [ -n "$VAULT_TOKEN" ]; then
+        export VAULT_TOKEN
+    fi
+fi
+VAULT_CONFIG
     
     echo "Testing TPM2 key generation..."
     export TPM2TOOLS_TCTI="device:/dev/tpmrm0"

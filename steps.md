@@ -30,11 +30,19 @@ This document provides step-by-step instructions for demonstrating TPM-based TLS
 ### Setup Script Features
 - ✅ Automatic TPM2 library installation with Ubuntu 24 compatibility
 - ✅ OpenSSL TPM2 provider compilation and configuration
-- ✅ Vault server installation with proper TLS certificate setup
-- ✅ PKI engine and TLS cert authentication configuration
-- ✅ vault-tpm-helper v0.1.1 installation from GitHub releases
+- ✅ Vault server installation with proper TLS certificate setup **including SANs**
+- ✅ PKI engine and TLS cert authentication configuration (supports ECC keys)
+- ✅ vault-tmp-helper v0.1.1 installation from GitHub releases
+- ✅ TPM2TOOLS_TCTI environment configuration for TSS2 key generation
 - ✅ Intelligent handling of existing Vault installations
 - ✅ Comprehensive error handling and validation
+
+### Critical Requirements for vault-tpm-helper Success
+1. **TSS2 Keys**: Private keys must be in TSS2 format (generated with `-provider tpm2`)
+2. **TLS Certificate SANs**: Vault server certificate must include Subject Alternative Names
+3. **PKI Role**: Must accept ECC keys (`key_type = any`)  
+4. **Environment**: `TPM2TOOLS_TCTI="device:/dev/tpmrm0"` must be set
+5. **Provider Specification**: Use both `-provider tpm2 -provider default` for TSS2 key operations
 
 ## Step 1: Connect to the Server
 
@@ -77,6 +85,20 @@ vault status
 
 # Verify Vault is unsealed and accessible
 curl -k https://localhost:8200/v1/sys/health
+```
+
+### Verify TLS Certificate Configuration
+```bash
+# Check if Vault server certificate has proper SANs (required for vault-tpm-helper)
+echo "Checking Vault server certificate SANs:"
+openssl s_client -connect localhost:8200 -servername localhost < /dev/null 2>/dev/null | openssl x509 -noout -text | grep -A5 'Subject Alternative Name'
+
+# Expected output should show:
+# X509v3 Subject Alternative Name: 
+#     DNS:vault-tpm-demo, DNS:localhost, IP Address:127.0.0.1, IP Address:172.16.236.132
+
+# If SANs are missing, vault-tmp-helper will fail with TLS errors
+# See troubleshooting section for how to fix this
 ```
 
 ### Check Authentication Methods
@@ -175,9 +197,10 @@ fi
 # Ensure TPM2 environment is set
 export TPM2TOOLS_TCTI="device:/dev/tpmrm0"
 
-# Create CSR using TPM-backed private key
+# Create CSR using TPM-backed private key (requires tpm2 provider for TSS2 key)
 openssl req -new \
     -provider tpm2 \
+    -provider default \
     -key client.key.pem \
     -out client.csr \
     -subj "/C=US/ST=CA/L=Demo/O=TPM-Demo/CN=tpm-client"
@@ -187,6 +210,7 @@ openssl req -in client.csr -text -noout
 ```
 
 ### Sign Certificate with Vault PKI
+Make sure VAULT_TOKEN is set.
 ```bash
 # Sign the CSR using Vault PKI
 vault write pki/sign/client-cert \
@@ -209,15 +233,22 @@ openssl x509 -in client.cert.pem -text -noout
 ### Authenticate Using vault-tpm-helper
 
 ```bash
+# Extract Vault server certificate for TLS verification
+openssl s_client -connect localhost:8200 -servername localhost < /dev/null 2>/dev/null | openssl x509 > vault-server-ca.pem
+
 # Test authentication with vault-tpm-helper
 vault-tpm-helper \
-    -vault-addr="https://localhost:8200" \
-    -tls-skip-verify \
-    -cert-file="client.cert.pem" \
-    -key-file="client.key.pem" \
-    -auth-path="cert"
+    -vaultaddr="https://localhost:8200" \
+    -client-cert="client.cert.pem" \
+    -client-key="client.key.pem" \
+    -authpath="cert" \
+    -name="demo" \
+    -ca="vault-server-ca.pem" \
+    -debug
 
 # If successful, you should see a client token returned
+# Example successful output:
+# hvs.CAESICbtrb1PFM1g1npjxClzfWouWXHsTM76LuS-StYesPtNGh4KHGh2cy5VMW9UY085OThabFFrRkFHdzFDWFVaQUk
 ```
 
 ### Alternative: Direct Certificate Authentication
@@ -233,16 +264,21 @@ curl -k \
 
 ### Verify Token Functionality
 ```bash
-# Save the token from previous authentication
-CLIENT_TOKEN="<token_from_vault-tpm-helper_output>"
+# Save the token from vault-tpm-helper output (example token shown)
+CLIENT_TOKEN="hvs.CAESICbtrb1PFM1g1npjxClzfWouWXHsTM76LuS-StYesPtNGh4KHGh2cy5VMW9UY085OThabFFrRkFHdzFDWFVaQUk"
 export VAULT_TOKEN="$CLIENT_TOKEN"
 
-# Test token by reading Vault status
-vault auth -method=token token="$CLIENT_TOKEN"
-vault kv list secret/ 2>/dev/null || echo "No secrets found (expected for new setup)"
-
-# Verify token information
+# Test token functionality
 vault token lookup
+
+# The token should show:
+# - display_name: "cert-TPM Demo Cert" (indicating certificate-based auth)
+# - policies: ["default"]
+# - meta: containing certificate details including serial_number and common_name
+# - ttl: ~768h (32 days)
+
+# Test access to secrets
+vault kv list secret/ 2>/dev/null || echo "No secrets found (expected for new setup)"
 ```
 
 ## Step 7: Comprehensive Testing
@@ -258,7 +294,7 @@ ssh lsong@vault-tpm-demo
 cd ~/vault-client-certs
 
 # Test if TPM key still works
-openssl dgst -sha256 -sign client.key.pem -provider tpm2 /etc/hostname > test-signature.bin
+openssl dgst -sha256 -sign client.key.pem -provider tpm2 -provider default /etc/hostname > test-signature.bin
 echo "✓ TPM key still functional after reboot"
 rm test-signature.bin
 ```
@@ -267,7 +303,7 @@ rm test-signature.bin
 ```bash
 # Double-check that client.key.pem contains TSS2 format
 echo "Verifying TPM key format:"
-if openssl pkey -in client.key.pem -provider tpm2 -text -noout | grep -q "TSS2"; then
+if openssl pkey -in client.key.pem -provider tpm2 -provider default -text -noout | grep -q "TSS2"; then
     echo "✓ Confirmed: Key is in TSS2 format (TPM-backed)"
 else
     echo "✗ Error: Key is not in TSS2 format"
@@ -299,7 +335,7 @@ sudo tpm2_getcap properties-fixed
 openssl list -providers -verbose
 
 # Test key file integrity (MUST use tpm2 provider for TSS2 keys)
-openssl pkey -in client.key.pem -provider tpm2 -check
+openssl pkey -in client.key.pem -provider tpm2 -provider default -check
 
 # Verify key is actually TPM-backed
 head -1 client.key.pem  # Should show "-----BEGIN TSS2 PRIVATE KEY-----"
@@ -377,6 +413,65 @@ nc -zv localhost 8200
 ./reset-vault.sh
 ```
 
+### If vault-tpm-helper Fails with TLS Errors
+
+**Problem:** vault-tmp-helper fails with TLS certificate verification errors like:
+- `certificate is not valid for any names`
+- `certificate relies on legacy Common Name field, use SANs instead`
+- `certificate signed by unknown authority`
+
+**Root Cause:** Vault server certificate lacks proper Subject Alternative Names (SANs)
+
+```bash
+# Fix: Regenerate Vault server certificate with proper SANs
+sudo systemctl stop vault
+
+# Create new certificate with SANs for localhost, hostname, and IP
+SERVER_IP=$(hostname -I | awk '{print $1}')
+sudo openssl req -x509 -newkey rsa:4096 \
+    -keyout /etc/vault.d/vault-key.pem \
+    -out /etc/vault.d/vault-cert.pem \
+    -days 365 -nodes \
+    -subj "/C=US/ST=CA/L=SF/O=Demo/CN=vault-tpm-demo" \
+    -addext "subjectAltName=DNS:vault-tpm-demo,DNS:localhost,IP:127.0.0.1,IP:${SERVER_IP}"
+
+sudo chown vault:vault /etc/vault.d/vault-*.pem
+sudo chmod 600 /etc/vault.d/vault-key.pem
+
+# Restart and unseal Vault
+sudo systemctl start vault
+sleep 5
+
+# Unseal Vault
+export VAULT_ADDR="https://localhost:8200"
+export VAULT_SKIP_VERIFY=1
+export VAULT_TOKEN=$(cat /tmp/vault-init.json | jq -r '.root_token')
+
+UNSEAL_KEY1=$(cat /tmp/vault-init.json | jq -r '.unseal_keys_b64[0]')
+UNSEAL_KEY2=$(cat /tmp/vault-init.json | jq -r '.unseal_keys_b64[1]')
+UNSEAL_KEY3=$(cat /tmp/vault-init.json | jq -r '.unseal_keys_b64[2]')
+
+vault operator unseal "$UNSEAL_KEY1"
+vault operator unseal "$UNSEAL_KEY2"
+vault operator unseal "$UNSEAL_KEY3"
+
+# Verify certificate has proper SANs
+echo "Verifying certificate SANs:"
+openssl s_client -connect localhost:8200 -servername localhost < /dev/null 2>/dev/null | openssl x509 -noout -text | grep -A5 'Subject Alternative Name'
+```
+
+**Expected output should show:**
+```
+X509v3 Subject Alternative Name: 
+    DNS:vault-tpm-demo, DNS:localhost, IP Address:127.0.0.1, IP Address:172.16.236.132
+```
+
+**Why SANs are critical:**
+- Modern TLS libraries (including Go, used by vault-tpm-helper) require Subject Alternative Names
+- Legacy certificates using only Common Name (CN) are rejected by default
+- Without proper SANs, vault-tmp-helper cannot establish TLS connections to Vault
+- The setup script now automatically creates certificates with proper SANs
+
 ### Reset Demo Environment
 
 ```bash
@@ -402,6 +497,9 @@ rm -rf ~/vault-client-certs
 - ✅ **Download errors**: vault-tpm-helper now downloads from correct tar.gz URLs
 - ✅ **Interactive prompts**: Use `--defaults` flag for unattended installation
 - ✅ **Duplicate engines**: Smart detection of already-enabled PKI/cert auth
+- ✅ **TLS certificate SANs**: Vault server certificates now include Subject Alternative Names
+- ✅ **PKI role compatibility**: Updated to accept ECC keys (`key_type = any`)
+- ✅ **TPM2 environment**: Proper `TPM2TOOLS_TCTI` configuration for TSS2 key generation
 
 ## Expected Results
 
