@@ -1,12 +1,13 @@
-# TPM-based Vault Authentication Demo Steps
+# TPM-based Vault Authentication Demo
 
 This document provides step-by-step instructions for demonstrating TPM-based TLS certificate authentication with HashiCorp Vault.
 
 ## Prerequisites
-
-- Server setup completed using `./setup.sh --defaults` (or `./setup.sh` for interactive mode)
-- SSH access to the configured server  
-- TPM device enabled and functional
+- Ubuntu 24
+- files encrypted and TPM device enabled on VM level
+- the current (supplied) linux user will be part of the sudoers
+- ssh is enabled and can logon with ssh keys (not username/password)
+- The default test ssh info: `ssh lsong@vault-tpm-demo`
 
 ### Running the Setup
 
@@ -28,19 +29,19 @@ This document provides step-by-step instructions for demonstrating TPM-based TLS
 ```
 
 ### Setup Script Features
-- ✅ Automatic TPM2 library installation via Ubuntu packages (simplified approach)
-- ✅ OpenSSL TPM2 provider configuration for TSS2 key generation
-- ✅ Vault server installation with proper TLS certificate setup **including SANs**
-- ✅ PKI engine and TLS cert authentication configuration (supports any key type including ECC)
-- ✅ **KV v2 secrets engine** enabled at `secret/` path with sample data
-- ✅ **Comprehensive KV access policy** for TPM certificate authentication
-- ✅ vault-tpm-helper installation from GitHub releases
-- ✅ TPM2TOOLS_TCTI environment configuration in .bashrc
-- ✅ **Sample secrets** for immediate testing (demo/app, demo/config, myapp/credentials)
-- ✅ **Application-specific authentication examples** for custom policies
-- ✅ TSS group creation and user permissions for TPM device access
-- ✅ Intelligent handling of existing Vault installations
-- ✅ Comprehensive error handling and validation
+- Automatic TPM2 library installation via Ubuntu packages (simplified approach)
+- OpenSSL TPM2 provider configuration for TSS2 key generation
+- Vault server installation with proper TLS certificate setup **including SANs**
+- PKI engine and TLS cert authentication configuration (supports any key type including ECC)
+- **KV v2 secrets engine** enabled at `secret/` path with sample data
+- **Comprehensive KV access policy** for TPM certificate authentication
+- vault-tpm-helper installation from GitHub releases
+- TPM2TOOLS_TCTI environment configuration in .bashrc
+- **Sample secrets** for immediate testing (demo/app, demo/config, myapp/credentials)
+- **Application-specific authentication examples** for custom policies
+- TSS group creation and user permissions for TPM device access
+- Intelligent handling of existing Vault installations
+- Comprehensive error handling and validation
 
 ### Critical Requirements for vault-tpm-helper Success
 1. **TSS2 Keys**: Private keys must be in TSS2 format (generated with `-provider tpm2`)
@@ -167,7 +168,7 @@ file test-tpm-key.pem
 rm test-tpm-key.pem
 ```
 
-**⚠️ Critical Check:** If you see `-----BEGIN PRIVATE KEY-----` instead of `-----BEGIN TSS2 PRIVATE KEY-----`, the TPM2 provider is not working correctly, and the key is NOT TPM-backed! You must fix this before proceeding.
+**Critical Check:** If you see `-----BEGIN PRIVATE KEY-----` instead of `-----BEGIN TSS2 PRIVATE KEY-----`, the TPM2 provider is not working correctly, and the key is NOT TPM-backed! You must fix this before proceeding.
 
 ## Step 5: Generate TPM-based Client Certificate
 
@@ -190,9 +191,9 @@ openssl genpkey \
 # Verify the key is TPM-backed by checking for TSS2 content
 echo "Checking if key is TPM-backed:"
 if grep -q "TSS2" client.key.pem; then
-    echo "✓ Key contains TSS2 data - TPM-backed key confirmed"
+    echo "Key contains TSS2 data - TPM-backed key confirmed"
 else
-    echo "✗ Key does not contain TSS2 data - NOT TPM-backed"
+    echo "Key does not contain TSS2 data - NOT TPM-backed"
     exit 1
 fi
 ```
@@ -427,7 +428,7 @@ cd ~/vault-client-certs
 
 # Test if TPM key still works
 openssl dgst -sha256 -sign client.key.pem -provider tpm2 -provider default /etc/hostname > test-signature.bin
-echo "✓ TPM key still functional after reboot"
+echo "TPM key still functional after reboot"
 rm test-signature.bin
 ```
 
@@ -436,9 +437,9 @@ rm test-signature.bin
 # Double-check that client.key.pem contains TSS2 format
 echo "Verifying TPM key format:"
 if openssl pkey -in client.key.pem -provider tpm2 -provider default -text -noout | grep -q "TSS2"; then
-    echo "✓ Confirmed: Key is in TSS2 format (TPM-backed)"
+    echo "Confirmed: Key is in TSS2 format (TPM-backed)"
 else
-    echo "✗ Error: Key is not in TSS2 format"
+    echo "Error: Key is not in TSS2 format"
     exit 1
 fi
 ```
@@ -624,14 +625,14 @@ rm -rf ~/vault-client-certs
 
 ### Common Setup Issues Fixed
 
-- ✅ **Package compatibility**: TSS2 libraries updated for Ubuntu 24
-- ✅ **Vault unsealing**: Proper handling of existing sealed/unsealed states
-- ✅ **Download errors**: vault-tpm-helper now downloads from correct tar.gz URLs
-- ✅ **Interactive prompts**: Use `--defaults` flag for unattended installation
-- ✅ **Duplicate engines**: Smart detection of already-enabled PKI/cert auth
-- ✅ **TLS certificate SANs**: Vault server certificates now include Subject Alternative Names
-- ✅ **PKI role compatibility**: Updated to accept ECC keys (`key_type = any`)
-- ✅ **TPM2 environment**: Proper `TPM2TOOLS_TCTI` configuration for TSS2 key generation
+- **Package compatibility**: TSS2 libraries updated for Ubuntu 24
+- **Vault unsealing**: Proper handling of existing sealed/unsealed states
+- **Download errors**: vault-tpm-helper now downloads from correct tar.gz URLs
+- **Interactive prompts**: Use `--defaults` flag for unattended installation
+- **Duplicate engines**: Smart detection of already-enabled PKI/cert auth
+- **TLS certificate SANs**: Vault server certificates now include Subject Alternative Names
+- **PKI role compatibility**: Updated to accept ECC keys (`key_type = any`)
+- **TPM2 environment**: Proper `TPM2TOOLS_TCTI` configuration for TSS2 key generation
 
 ## Expected Results
 
@@ -644,9 +645,9 @@ rm -rf ~/vault-client-certs
 
 ## Success Indicators
 
-- ✅ TPM device responds to `tpm2_getcap` commands
-- ✅ OpenSSL lists TPM2 provider in available providers
-- ✅ Generated key file contains "TSS2" identifier
-- ✅ vault-tpm-helper returns valid authentication token
-- ✅ Token allows access to Vault operations
-- ✅ Authentication works consistently across multiple attempts
+- TPM device responds to `tpm2_getcap` commands
+- OpenSSL lists TPM2 provider in available providers
+- Generated key file contains "TSS2" identifier
+- vault-tpm-helper returns valid authentication token
+- Token allows access to Vault operations
+- Authentication works consistently across multiple attempts
