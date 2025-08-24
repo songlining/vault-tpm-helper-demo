@@ -70,68 +70,29 @@ echo "Updating package lists..."
 sudo apt-get update -y
 
 echo "Installing required packages..."
-
-echo "Installing base packages..."
 sudo apt-get install -y \
     wget \
     curl \
     unzip \
-    pv \
-    build-essential \
-    pkg-config \
-    libssl-dev \
     openssl \
     jq \
-    autotools-dev \
-    autoconf \
-    libtool
-
-echo "Installing TPM2 and TSS2 packages..."
-sudo apt-get install -y \
     tpm2-tools \
-    libtss2-dev || echo "Warning: Some TPM2 development packages may not be available"
+    tpm2-openssl \
+    libtss2-dev
 
-echo "Installing TSS2 runtime libraries..."
-# Install available TSS2 libraries without specific versions
-sudo apt-get install -y \
-    libtss2-esys0 \
-    libtss2-mu0 \
-    libtss2-rc0 \
-    libtss2-sys1 \
-    libtss2-tcti-cmd0 \
-    libtss2-tcti-device0 \
-    libtss2-tcti-mssim0 \
-    libtss2-tcti-swtpm0 2>/dev/null || {
-        echo "Warning: Some TSS2 library packages not available, installing core libraries..."
-        # Try to install at least the essential ones
-        sudo apt-get install -y libtss2-esys0 libtss2-sys1 || echo "Warning: Using available TPM2 libraries from tpm2-tools package"
-    }
+echo "✓ All packages installed using simplified Ubuntu package approach"
 
-# Try to install FAPI if available (optional)
-sudo apt-get install -y libtss2-fapi1 2>/dev/null || echo "Note: FAPI library not available (not required for basic TPM operations)"
+echo "Adding user to tss group for TPM device access..."
+USERNAME=$(whoami)
 
-echo "Installing TPM2 OpenSSL provider..."
-if [ ! -f "/usr/lib/aarch64-linux-gnu/ossl-modules/tpm2.so" ] && [ ! -f "/usr/lib/x86_64-linux-gnu/ossl-modules/tpm2.so" ]; then
-    cd /tmp
-    wget -O tpm2-openssl.tar.gz https://github.com/tpm2-software/tpm2-openssl/archive/refs/tags/1.2.0.tar.gz
-    tar -xzf tpm2-openssl.tar.gz
-    cd tpm2-openssl-1.2.0
-    
-    ./bootstrap
-    ./configure
-    make -j$(nproc)
-    sudo make install
-    
-    ARCH=$(uname -m)
-    if [ "$ARCH" = "aarch64" ]; then
-        OSSL_MODULE_DIR="/usr/lib/aarch64-linux-gnu/ossl-modules"
-    else
-        OSSL_MODULE_DIR="/usr/lib/x86_64-linux-gnu/ossl-modules"
-    fi
-    
-    sudo mkdir -p "$OSSL_MODULE_DIR"
-    sudo cp src/.libs/tpm2.so "$OSSL_MODULE_DIR/"
+# Create tss group if it doesn't exist
+if ! grep -q "^tss:" /etc/group; then
+    echo "Creating tss group..."
+    sudo groupadd tss
 fi
+
+sudo usermod -a -G tss $USERNAME
+echo "✓ User $USERNAME added to tss group (will take effect on next login)"
 
 echo "Configuring OpenSSL for TPM2 provider..."
 OPENSSL_CONF="/etc/ssl/openssl.cnf"
@@ -433,33 +394,33 @@ if openssl list -providers | grep -q tpm2; then
     
     echo "Configuring TPM2 environment..."
     echo 'export TPM2TOOLS_TCTI="device:/dev/tpmrm0"' | sudo tee -a /etc/environment
-    echo 'export TPM2TOOLS_TCTI="device:/dev/tpmrm0"' >> ~/.bashrc
     
-    echo "Configuring Vault environment..."
-    cat >> ~/.bashrc << 'VAULT_CONFIG'
+    echo "Configuring Vault and TPM2 environment..."
+    cat >> ~/.bashrc << 'BASHRC_EOF'
+
+# Vault and TPM2 Environment Configuration
 export VAULT_ADDR="https://localhost:8200"
 export VAULT_SKIP_VERIFY=1
+export TPM2TOOLS_TCTI="device:/dev/tpmrm0"
 
-# Dynamically retrieve Vault root token
+# Dynamically retrieve Vault root token if available
 if [ -f /tmp/vault-init.json ] && command -v jq >/dev/null 2>&1; then
-    VAULT_TOKEN=$(cat /tmp/vault-init.json | jq -r '.root_token' 2>/dev/null)
-    if [ "$VAULT_TOKEN" != "null" ] && [ -n "$VAULT_TOKEN" ]; then
-        export VAULT_TOKEN
-    fi
+    export VAULT_TOKEN=$(cat /tmp/vault-init.json | jq -r '.root_token' 2>/dev/null)
 fi
-VAULT_CONFIG
+BASHRC_EOF
     
     echo "Testing TPM2 key generation..."
     export TPM2TOOLS_TCTI="device:/dev/tpmrm0"
-    if openssl genpkey -provider tpm2 -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out /tmp/test-tpm-key.pem 2>/dev/null; then
-        if head -1 /tmp/test-tpm-key.pem | grep -q "TSS2"; then
+    # Test with proper group permissions (user needs to be in tss group)
+    if grep -q "^tss:" /etc/group && sudo -u $USERNAME -g tss bash -c "export TPM2TOOLS_TCTI='device:/dev/tpmrm0' && openssl genpkey -provider tpm2 -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out /tmp/test-tpm-key.pem 2>/dev/null"; then
+        if sudo -u $USERNAME -g tss head -1 /tmp/test-tpm-key.pem | grep -q "TSS2"; then
             echo "✓ TPM2 provider generating TSS2 keys correctly"
         else
             echo "WARNING: TPM2 provider loaded but not generating TSS2 keys"
         fi
-        rm -f /tmp/test-tpm-key.pem
+        sudo rm -f /tmp/test-tpm-key.pem
     else
-        echo "WARNING: TPM2 key generation failed"
+        echo "WARNING: TPM2 key generation failed (user will need to log out/in for tss group to take effect)"
     fi
 else
     echo "WARNING: TPM2 provider not loaded properly"
@@ -486,11 +447,13 @@ ssh $SSH_TARGET "$REMOTE_SETUP_DIR/remote_setup.sh"
 echo
 echo "=== Setup Complete ==="
 echo "Server: $SSH_TARGET"
-echo "✓ TPM libraries installed"
-echo "✓ OpenSSL configured for TPM2"
-echo "✓ Vault server installed and running"
-echo "✓ PKI and TLS cert auth enabled"
+echo "✓ TPM2 tools and OpenSSL provider installed via Ubuntu packages (simplified approach)"
+echo "✓ User added to tss group for TPM device access"
+echo "✓ OpenSSL configured for TPM2 provider"
+echo "✓ Vault server installed with proper TLS certificate (including SANs)"
+echo "✓ PKI engine and TLS cert auth enabled (supports any key type including ECC)"
 echo "✓ vault-tpm-helper installed"
 echo
+echo "IMPORTANT: Log out and back in for tss group membership to take effect"
 echo "Connect to server: ssh $SSH_TARGET"
 echo "Vault URL: https://$HOSTNAME:8200"
