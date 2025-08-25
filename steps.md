@@ -103,7 +103,7 @@ openssl s_client -connect localhost:8200 -servername localhost < /dev/null 2>/de
 # X509v3 Subject Alternative Name: 
 #     DNS:vault-tpm-demo, DNS:localhost, IP Address:127.0.0.1, IP Address:172.16.236.132
 
-# If SANs are missing, vault-tmp-helper will fail with TLS errors
+# If SANs are missing, vault-tpm-helper will fail with TLS errors
 # See troubleshooting section for how to fix this
 ```
 
@@ -548,7 +548,7 @@ nc -zv localhost 8200
 
 ### If vault-tpm-helper Fails with TLS Errors
 
-**Problem:** vault-tmp-helper fails with TLS certificate verification errors like:
+**Problem:** vault-tpm-helper fails with TLS certificate verification errors like:
 - `certificate is not valid for any names`
 - `certificate relies on legacy Common Name field, use SANs instead`
 - `certificate signed by unknown authority`
@@ -602,7 +602,7 @@ X509v3 Subject Alternative Name:
 **Why SANs are critical:**
 - Modern TLS libraries (including Go, used by vault-tpm-helper) require Subject Alternative Names
 - Legacy certificates using only Common Name (CN) are rejected by default
-- Without proper SANs, vault-tmp-helper cannot establish TLS connections to Vault
+- Without proper SANs, vault-tpm-helper cannot establish TLS connections to Vault
 - The setup script now automatically creates certificates with proper SANs
 
 ### Reset Demo Environment
