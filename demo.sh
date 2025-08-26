@@ -87,6 +87,8 @@ wait_for_user
 step_header "Step 4: Verify OpenSSL TPM2 Provider"
 echo "Testing TPM2 Provider Loading..."
 pe "export TPM2TOOLS_TCTI=\"device:/dev/tpmrm0\""
+# pe "export OPENSSL_CONF=/tmp/tpm2-openssl.cnf"
+pe "openssl list -providers"
 echo -e "\nGenerating a test key using TPM2 provider..."
 pe "openssl genpkey -provider tpm2 -algorithm EC -pkeyopt ec_paramgen_curve:prime256v1 -out test-tpm-key.pem"
 echo -e "\nVerifying the key contains TSS2 data (TPM-specific format):"

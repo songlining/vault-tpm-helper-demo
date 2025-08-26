@@ -97,23 +97,8 @@ fi
 sudo usermod -a -G tss $USERNAME
 echo "✓ User $USERNAME added to tss group (will take effect on next login)"
 
-echo "Configuring OpenSSL for TPM2 provider..."
-OPENSSL_CONF="/etc/ssl/openssl.cnf"
-sudo cp "$OPENSSL_CONF" "${OPENSSL_CONF}.backup"
-
-if ! grep -q "openssl_conf = openssl_init" "$OPENSSL_CONF"; then
-    echo "Adding OpenSSL configuration for TPM2..."
-    
-    ARCH=$(uname -m)
-    if [ "$ARCH" = "aarch64" ]; then
-        MODULE_PATH="/usr/lib/aarch64-linux-gnu/ossl-modules/tpm2.so"
-    else
-        MODULE_PATH="/usr/lib/x86_64-linux-gnu/ossl-modules/tpm2.so"
-    fi
-    
-    sudo tee -a "$OPENSSL_CONF" > /dev/null << OPENSSL_EOF
-
-# TPM2 Provider Configuration
+echo "Creating TPM2 OpenSSL configuration..."
+tee /tmp/tpm2-openssl.cnf > /dev/null << 'OPENSSL_EOF'
 openssl_conf = openssl_init
 
 [openssl_init]
@@ -128,9 +113,8 @@ activate = 1
 
 [tpm2_sect]
 activate = 1
-module = $MODULE_PATH
+module = /usr/lib/aarch64-linux-gnu/ossl-modules/tpm2.so
 OPENSSL_EOF
-fi
 
 echo "Installing Hashicorp Vault..."
 if ! command -v vault &> /dev/null; then
