@@ -2,6 +2,8 @@
 
 This document provides step-by-step instructions for demonstrating TPM-based TLS certificate authentication with HashiCorp Vault.
 
+It's based on information from https://github.com/ausmartway/vault-tpm-helper
+
 ## Prerequisites
 - Ubuntu 24
 - files encrypted and TPM device enabled on VM level
@@ -55,6 +57,7 @@ This document provides step-by-step instructions for demonstrating TPM-based TLS
 ```bash
 ssh lsong@vault-tpm-demo
 ```
+Verify you can ssh to the server without password.  Also verify the current user can `sudo` without password.  This is for the `setup.sh` to run without interruption.
 
 ## Step 2: Verify TPM Readiness
 

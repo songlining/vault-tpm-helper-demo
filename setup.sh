@@ -78,6 +78,7 @@ sudo apt-get install -y \
     jq \
     tpm2-tools \
     tpm2-openssl \
+    pv \
     libtss2-dev
 
 echo "✓ All packages installed using simplified Ubuntu package approach"
